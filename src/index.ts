@@ -1,6 +1,11 @@
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import { inventoryRoutes, craftRoutes, itemsRoutes } from './controllers.js'
 
 const app = new Hono()
+
+// Разрешаем CORS для всех (полезно при разработке и для мобильных клиентов)
+app.use('/*', cors())
 
 const welcomeStrings = [
   "Hello Hono!",
@@ -10,5 +15,9 @@ const welcomeStrings = [
 app.get('/', (c) => {
   return c.text(welcomeStrings.join('\n\n'))
 })
+
+app.route('/api/inventory', inventoryRoutes)
+app.route('/api/craft', craftRoutes)
+app.route('/api/items', itemsRoutes)
 
 export default app

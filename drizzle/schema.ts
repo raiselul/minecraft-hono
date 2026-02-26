@@ -1,72 +1,69 @@
 import {
-  pgTable,
-  uuid,
-  varchar,
+  sqliteTable,
   text,
   integer,
   uniqueIndex,
-} from "drizzle-orm/pg-core";
+} from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 
-// ==========================================
-// 1. ТАБЛИЦЫ
-// ==========================================
-
-// Справочник всех предметов в игре
-export const items = pgTable("items", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  name: varchar("name", { length: 255 }).notNull(),
+export const items = sqliteTable("items", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
   description: text("description"),
-  maxStackSize: integer("max_stack_size").default(64).notNull(),
+  imageUrl: text("image_url"),
+  maxStack: integer("max_stack").notNull(),
 });
 
-// Инвентарь (для одного пользователя)
-export const inventory = pgTable(
+export const inventory = sqliteTable(
   "inventory",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
-    slotIndex: integer("slot_index").notNull(), // Ячейки от 0 до 35
-    itemId: uuid("item_id")
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    itemId: integer("item_id")
       .references(() => items.id, { onDelete: "cascade" })
       .notNull(),
     quantity: integer("quantity").notNull(),
+    slotIndex: integer("slot_index").notNull(),
   },
   (table) => {
     return {
-      // Гарантируем, что в одном слоте не будет лежать две разные записи
-      slotIdx: uniqueIndex("slot_idx").on(table.slotIndex),
+      slotIdx: uniqueIndex("unique_inventory_slot").on(table.slotIndex),
     };
   },
 );
 
-// Рецепты (Результат крафта)
-export const recipes = pgTable("recipes", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  resultItemId: uuid("result_item_id")
+export const recipes = sqliteTable("recipes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  itemId: integer("item_id")
     .references(() => items.id, { onDelete: "cascade" })
     .notNull(),
-  resultQuantity: integer("result_quantity").default(1).notNull(),
+  quantity: integer("quantity").notNull(),
+  duration: integer("duration").default(0).notNull(),
 });
 
-// Ингредиенты (Из чего состоит рецепт)
-export const ingredients = pgTable("ingredients", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  recipeId: uuid("recipe_id")
-    .references(() => recipes.id, { onDelete: "cascade" })
-    .notNull(),
-  itemId: uuid("item_id")
-    .references(() => items.id, { onDelete: "cascade" })
-    .notNull(),
-  quantity: integer("quantity").default(1).notNull(),
-  gridPosition: integer("grid_position"), // 0-8 для сетки 3x3. Если null — рецепт бесформенный
-});
-
-// ==========================================
-// 2. СВЯЗИ (Drizzle Relations)
-// ==========================================
+export const ingredients = sqliteTable(
+  "ingredients",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    recipeId: integer("recipe_id")
+      .references(() => recipes.id, { onDelete: "cascade" })
+      .notNull(),
+    itemId: integer("item_id")
+      .references(() => items.id, { onDelete: "cascade" })
+      .notNull(),
+    quantity: integer("quantity").notNull(),
+    slotIndex: integer("slot_index").notNull(),
+  },
+  (table) => {
+    return {
+      recipeSlotIdx: uniqueIndex("unique_recipe_slot").on(
+        table.recipeId,
+        table.slotIndex,
+      ),
+    };
+  },
+);
 
 export const inventoryRelations = relations(inventory, ({ one }) => ({
-  // Позволяет при запросе инвентаря легко подтянуть данные о предмете
   item: one(items, {
     fields: [inventory.itemId],
     references: [items.id],
@@ -74,22 +71,18 @@ export const inventoryRelations = relations(inventory, ({ one }) => ({
 }));
 
 export const recipesRelations = relations(recipes, ({ one, many }) => ({
-  // Позволяет узнать, какой предмет получается в результате
   resultItem: one(items, {
-    fields: [recipes.resultItemId],
+    fields: [recipes.itemId],
     references: [items.id],
   }),
-  // Позволяет вытащить список всех ингредиентов для этого рецепта
   ingredients: many(ingredients),
 }));
 
 export const ingredientsRelations = relations(ingredients, ({ one }) => ({
-  // Связь ингредиента с его рецептом
   recipe: one(recipes, {
     fields: [ingredients.recipeId],
     references: [recipes.id],
   }),
-  // Связь ингредиента с таблицей предметов (чтобы знать название нужного ресурса)
   item: one(items, {
     fields: [ingredients.itemId],
     references: [items.id],
