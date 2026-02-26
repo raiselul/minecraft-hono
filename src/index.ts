@@ -4,7 +4,6 @@ import { inventoryRoutes, craftRoutes, itemsRoutes } from './controllers.js'
 
 const app = new Hono()
 
-// Разрешаем CORS для всех (полезно при разработке и для мобильных клиентов)
 app.use('/*', cors())
 
 const welcomeStrings = [

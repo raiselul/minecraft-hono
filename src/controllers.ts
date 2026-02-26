@@ -5,6 +5,66 @@ import { inventory, items, recipes, ingredients } from '../drizzle/schema.js';
 
 export const inventoryRoutes = new Hono();
 
+// 0. GET /api/inventory (Получить инвентарь)
+inventoryRoutes.get('/', async (c) => {
+    try {
+        const invRows = await db
+            .select({
+                id: inventory.id,
+                itemId: inventory.itemId,
+                quantity: inventory.quantity,
+                slotIndex: inventory.slotIndex,
+                item: {
+                    id: items.id,
+                    name: items.name,
+                    description: items.description,
+                    imageUrl: items.imageUrl,
+                    maxStack: items.maxStack,
+                }
+            })
+            .from(inventory)
+            .innerJoin(items, eq(inventory.itemId, items.id));
+        
+        return c.json({ inventory: invRows });
+    } catch (error) {
+        console.error(error);
+        return c.json({ error: 'Internal Server Error' }, 500);
+    }
+});
+
+// 0.1 PUT /api/inventory (Синхронизировать весь инвентарь)
+inventoryRoutes.put('/', async (c) => {
+    try {
+        const body = await c.req.json();
+        // Поддерживаем формат массива напрямую или в свойстве inventory
+        const itemsToUpdate = Array.isArray(body) ? body : body.inventory;
+
+        if (!Array.isArray(itemsToUpdate)) {
+            return c.json({ error: 'Expected an array of inventory items' }, 400);
+        }
+
+        await db.transaction(async (tx) => {
+            // Очищаем существующий инвентарь
+            await tx.delete(inventory);
+            
+            // Записываем новые элементы
+            if (itemsToUpdate.length > 0) {
+                const values = itemsToUpdate.map((item: any) => ({
+                    itemId: item.item ? item.item.id : item.itemId,
+                    quantity: item.quantity,
+                    slotIndex: item.slotIndex,
+                }));
+                await tx.insert(inventory).values(values);
+            }
+        });
+
+        return c.json({ success: true, message: 'Inventory synced successfully' });
+    } catch (error) {
+        console.error(error);
+        return c.json({ error: 'Internal Server Error' }, 500);
+    }
+});
+
 // 1. POST /api/inventory/move (Перемещение / Drag & Drop)
 inventoryRoutes.post('/move', async (c) => {
     try {
