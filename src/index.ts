@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { inventoryRoutes, craftRoutes, itemsRoutes } from './controllers.js'
+import { inventoryRoutes, craftRoutes, itemsRoutes, recipesRoutes } from './controllers.js'
 
 const app = new Hono()
 
@@ -18,5 +18,15 @@ app.get('/', (c) => {
 app.route('/api/inventory', inventoryRoutes)
 app.route('/api/craft', craftRoutes)
 app.route('/api/items', itemsRoutes)
+app.route('/api/recipes', recipesRoutes)
+
+import { swaggerUI } from '@hono/swagger-ui'
+import { openapiSpec } from './openapi.js'
+
+app.get('/openapi.yaml', (c) => {
+  c.header('Content-Type', 'text/yaml')
+  return c.text(openapiSpec)
+})
+app.get('/docs', swaggerUI({ url: '/openapi.yaml' }))
 
 export default app

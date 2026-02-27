@@ -8,6 +8,7 @@
     "db:seed": "tsx drizzle/seed.ts"
   },
   "dependencies": {
+    "@hono/swagger-ui": "^0.5.3",
     "@libsql/client": "^0.17.0",
     "dotenv": "^17.3.1",
     "drizzle-orm": "^0.45.1",

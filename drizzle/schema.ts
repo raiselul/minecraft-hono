@@ -36,7 +36,8 @@ export const recipes = sqliteTable("recipes", {
   itemId: integer("item_id")
     .references(() => items.id, { onDelete: "cascade" })
     .notNull(),
-  quantity: integer("quantity").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  type: text("type").notNull().default("shaped"),
   duration: integer("duration").default(0).notNull(),
 });
 
@@ -50,19 +51,21 @@ export const ingredients = sqliteTable(
     itemId: integer("item_id")
       .references(() => items.id, { onDelete: "cascade" })
       .notNull(),
-    quantity: integer("quantity").notNull(),
+    quantity: integer("quantity").notNull().default(1),
     slotIndex: integer("slot_index").notNull(),
   },
   (table) => {
     return {
-      recipeSlotIdx: uniqueIndex("unique_recipe_slot").on(
+      // 👇 Исправлено: убрали itemId, чтобы разрешить стакать одинаковые предметы в рецепте
+      recipeItemSlotIdx: uniqueIndex("unique_recipe_item_slot").on(
         table.recipeId,
-        table.slotIndex,
+        table.slotIndex, 
       ),
     };
   },
 );
 
+// Relations оставляем без изменений, они верны
 export const inventoryRelations = relations(inventory, ({ one }) => ({
   item: one(items, {
     fields: [inventory.itemId],

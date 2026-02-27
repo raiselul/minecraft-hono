@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db } from '../drizzle/index.js';
 import { inventory, items, recipes, ingredients } from '../drizzle/schema.js';
 
 export const inventoryRoutes = new Hono();
 
-// 0. GET /api/inventory (Получить инвентарь)
+// 0. GET /api/inventory (Получить инвентарь игрока)
 inventoryRoutes.get('/', async (c) => {
     try {
         const invRows = await db
@@ -266,6 +266,74 @@ inventoryRoutes.delete('/drop', async (c) => {
     }
 });
 
+// 6. POST /api/inventory/add (Добавить предмет в инвентарь)
+inventoryRoutes.post('/add', async (c) => {
+    try {
+        const { itemId, amount } = await c.req.json();
+        if (typeof itemId !== 'number' || typeof amount !== 'number') {
+            return c.json({ error: 'itemId and amount must be numbers' }, 400);
+        }
+        if (amount <= 0) return c.json({ error: 'Amount must be greater than 0' }, 400);
+
+        await db.transaction(async (tx) => {
+            const itemRows = await tx.select().from(items).where(eq(items.id, itemId));
+            const targetItem = itemRows[0];
+            if (!targetItem) throw new Error('404:Item not found in DB');
+
+            const invRows = await tx.select().from(inventory);
+            let amountToAdd = amount;
+
+            // Try filling existing stacks first
+            const existingStacks = invRows.filter(i => i.itemId === itemId);
+            for (const stack of existingStacks) {
+                if (amountToAdd <= 0) break;
+                const spaceLeft = targetItem.maxStack - stack.quantity;
+                if (spaceLeft > 0) {
+                    const toAdd = Math.min(spaceLeft, amountToAdd);
+                    await tx.update(inventory).set({ quantity: stack.quantity + toAdd }).where(eq(inventory.id, stack.id));
+                    amountToAdd -= toAdd;
+                }
+            }
+
+            // Fill empty slots if still amountToAdd > 0
+            if (amountToAdd > 0) {
+                const INVENTORY_SIZE = 36;
+                const usedSlots = new Set(invRows.map(i => i.slotIndex));
+
+                let emptySlot = 0;
+
+                while (amountToAdd > 0) {
+                    while (usedSlots.has(emptySlot)) {
+                        emptySlot++;
+                    }
+
+                    if (emptySlot >= INVENTORY_SIZE) {
+                        throw new Error('400:Инвентарь полон');
+                    }
+
+                    const toAdd = Math.min(targetItem.maxStack, amountToAdd);
+                    await tx.insert(inventory).values({
+                        itemId: itemId,
+                        quantity: toAdd,
+                        slotIndex: emptySlot,
+                    });
+
+                    usedSlots.add(emptySlot);
+                    amountToAdd -= toAdd;
+                }
+            }
+        });
+
+        return c.json({ success: true, message: 'Added successfully' });
+    } catch (error: any) {
+        if (error.message && error.message.startsWith('404:')) return c.json({ error: error.message.split('404:')[1] }, 404);
+        if (error.message && error.message.startsWith('400:')) return c.json({ error: error.message.split('400:')[1] }, 400);
+        console.error(error);
+        return c.json({ error: 'Internal Server Error' }, 500);
+    }
+});
+
+
 export const craftRoutes = new Hono();
 
 // 4. POST /api/craft (Создание предмета)
@@ -401,68 +469,38 @@ itemsRoutes.get('/', async (c) => {
     }
 });
 
-// 6. POST /api/inventory/add (Добавить предмет в инвентарь)
-inventoryRoutes.post('/add', async (c) => {
+export const recipesRoutes = new Hono();
+
+// 7. GET /api/recipes (Получить все рецепты с ингредиентами)
+recipesRoutes.get('/', async (c) => {
     try {
-        const { itemId, amount } = await c.req.json();
-        if (typeof itemId !== 'number' || typeof amount !== 'number') {
-            return c.json({ error: 'itemId and amount must be numbers' }, 400);
+        const allRecipes = await db.select().from(recipes);
+        const allIngredients = await db.select().from(ingredients);
+
+        // Group ingredients by recipeId
+        const ingredientsMap = new Map<number, any[]>();
+        for (const ing of allIngredients) {
+            if (!ingredientsMap.has(ing.recipeId)) {
+                ingredientsMap.set(ing.recipeId, []);
+            }
+            ingredientsMap.get(ing.recipeId)?.push({
+                itemId: ing.itemId,
+                quantity: ing.quantity,
+                slotIndex: ing.slotIndex
+            });
         }
-        if (amount <= 0) return c.json({ error: 'Amount must be greater than 0' }, 400);
 
-        await db.transaction(async (tx) => {
-            const itemRows = await tx.select().from(items).where(eq(items.id, itemId));
-            const targetItem = itemRows[0];
-            if (!targetItem) throw new Error('404:Item not found in DB');
+        const recipesWithIngredients = allRecipes.map(r => ({
+            id: r.id,
+            itemId: r.itemId,
+            quantity: r.quantity,
+            type: r.type,
+            duration: r.duration,
+            ingredients: ingredientsMap.get(r.id) || []
+        }));
 
-            const invRows = await tx.select().from(inventory);
-            let amountToAdd = amount;
-
-            // Try filling existing stacks first
-            const existingStacks = invRows.filter(i => i.itemId === itemId);
-            for (const stack of existingStacks) {
-                if (amountToAdd <= 0) break;
-                const spaceLeft = targetItem.maxStack - stack.quantity;
-                if (spaceLeft > 0) {
-                    const toAdd = Math.min(spaceLeft, amountToAdd);
-                    await tx.update(inventory).set({ quantity: stack.quantity + toAdd }).where(eq(inventory.id, stack.id));
-                    amountToAdd -= toAdd;
-                }
-            }
-
-            // Fill empty slots if still amountToAdd > 0
-            if (amountToAdd > 0) {
-                const INVENTORY_SIZE = 36;
-                const usedSlots = new Set(invRows.map(i => i.slotIndex));
-
-                let emptySlot = 0;
-
-                while (amountToAdd > 0) {
-                    while (usedSlots.has(emptySlot)) {
-                        emptySlot++;
-                    }
-
-                    if (emptySlot >= INVENTORY_SIZE) {
-                        throw new Error('400:Инвентарь полон');
-                    }
-
-                    const toAdd = Math.min(targetItem.maxStack, amountToAdd);
-                    await tx.insert(inventory).values({
-                        itemId: itemId,
-                        quantity: toAdd,
-                        slotIndex: emptySlot,
-                    });
-
-                    usedSlots.add(emptySlot);
-                    amountToAdd -= toAdd;
-                }
-            }
-        });
-
-        return c.json({ success: true, message: 'Added successfully' });
-    } catch (error: any) {
-        if (error.message && error.message.startsWith('404:')) return c.json({ error: error.message.split('404:')[1] }, 404);
-        if (error.message && error.message.startsWith('400:')) return c.json({ error: error.message.split('400:')[1] }, 400);
+        return c.json({ recipes: recipesWithIngredients });
+    } catch (error) {
         console.error(error);
         return c.json({ error: 'Internal Server Error' }, 500);
     }
